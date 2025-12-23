@@ -10,7 +10,7 @@ class AIPriorityService(Protocol):
 
     async def suggest_priority(
         self, title: str, description: str | None
-    ) -> tuple[Priority, str]:
+    ) -> tuple[Priority, str | None]:
         """
         Suggest priority and reason for a task based on its content.
 
@@ -19,13 +19,13 @@ class AIPriorityService(Protocol):
             description: Optional task description
 
         Returns:
-            Tuple of (Priority, reason_string)
+            Tuple of (Priority, reason_string or None)
         """
         ...
 
 
 PriorityCacheKey = str
-PriorityCacheValue = Tuple[Priority, str]
+PriorityCacheValue = Tuple[Priority, str | None]
 
 # Simple in-memory cache for priority suggestions.
 # Key: normalized "title|description" string
@@ -48,7 +48,7 @@ class OpenAIPriorityService:
 
     async def suggest_priority(
         self, title: str, description: str | None
-    ) -> tuple[Priority, str]:
+    ) -> tuple[Priority, str | None]:
         """
         Suggest priority using OpenAI API.
 
@@ -57,14 +57,14 @@ class OpenAIPriorityService:
             description: Optional task description
 
         Returns:
-            Tuple of (Priority, reason_string)
+            Tuple of (Priority, reason_string or None)
         """
         cache_key = _build_cache_key(title, description)
         if cache_key in _PRIORITY_CACHE:
             return _PRIORITY_CACHE[cache_key]
 
         if not self.api_key:
-            result = (Priority.MEDIUM, "AI service not configured")
+            result = (Priority.MEDIUM, None)
             _PRIORITY_CACHE[cache_key] = result
             return result
 
@@ -123,7 +123,7 @@ class OpenAIPriorityService:
             return result
 
         except Exception:
-            result = (Priority.MEDIUM, "AI service unavailable, using default priority")
+            result = (Priority.MEDIUM, None)
             _PRIORITY_CACHE[cache_key] = result
             return result
 
@@ -133,7 +133,7 @@ class MockAIPriorityService:
 
     async def suggest_priority(
         self, title: str, description: str | None
-    ) -> tuple[Priority, str]:
+    ) -> tuple[Priority, str | None]:
         """
         Mock priority suggestion based on simple heuristics.
 
@@ -142,7 +142,7 @@ class MockAIPriorityService:
             description: Optional task description
 
         Returns:
-            Tuple of (Priority, reason_string)
+            Tuple of (Priority, reason_string or None)
         """
         cache_key = _build_cache_key(title, description)
         if cache_key in _PRIORITY_CACHE:
@@ -152,27 +152,74 @@ class MockAIPriorityService:
         if description:
             content += " " + description.lower()
 
-        # Find matching keywords for better explanations
-        urgent_keywords = [word for word in ["urgent", "critical", "asap", "important", "pilne", "deadline"] if word in content]
-        low_keywords = [word for word in ["low", "minor", "later", "opcjonalne", "później"] if word in content]
-        
-        if urgent_keywords:
-            keywords_str = ", ".join([f"'{kw}'" for kw in urgent_keywords[:3]])
-            result: PriorityCacheValue = (
-                Priority.HIGH,
-                f"Wysoki priorytet: zadanie zawiera słowa kluczowe {keywords_str}, oraz jest związane z terminem"
-            )
-        elif low_keywords:
-            keywords_str = ", ".join([f"'{kw}'" for kw in low_keywords[:3]])
+        # Special handling: important exams in short time should be high priority
+        exam_keywords = ["egzamin", "exam"]
+        time_keywords = ["jutro", "dzisiaj", "dzis", "today", "tomorrow"]
+        importance_keywords = [
+            "bardzo ważny",
+            "bardzo wazny",
+            "ważny",
+            "wazny",
+            "critical",
+            "important",
+        ]
+
+        is_exam_related = any(keyword in content for keyword in exam_keywords)
+        is_time_sensitive = any(keyword in content for keyword in time_keywords)
+        is_marked_important = any(keyword in content for keyword in importance_keywords)
+
+        if is_exam_related and (is_time_sensitive or is_marked_important):
             result = (
-                Priority.LOW,
-                f"Niski priorytet: zadanie ma charakter opcjonalny i może być wykonane później (słowa kluczowe: {keywords_str})"
+                Priority.HIGH,
+                "Wysoki priorytet: zadanie dotyczy ważnego egzaminu w krótkim terminie "
+                "(słowa kluczowe: egzamin, jutro/bardzo ważny).",
             )
         else:
-            result = (
-                Priority.MEDIUM,
-                "Średni priorytet: zadanie dotyczy codziennych obowiązków bez określonego terminu"
-            )
+            # Find matching keywords for better explanations
+            urgent_keywords = [
+                word
+                for word in [
+                    "urgent",
+                    "critical",
+                    "asap",
+                    "important",
+                    "pilne",
+                    "deadline",
+                ]
+                if word in content
+            ]
+            low_keywords = [
+                word
+                for word in [
+                    "low",
+                    "minor",
+                    "later",
+                    "opcjonalne",
+                    "później",
+                ]
+                if word in content
+            ]
+
+            if urgent_keywords:
+                keywords_str = ", ".join([f"'{kw}'" for kw in urgent_keywords[:3]])
+                result = (
+                    Priority.HIGH,
+                    "Wysoki priorytet: zadanie zawiera słowa kluczowe "
+                    f"{keywords_str}, oraz jest związane z terminem",
+                )
+            elif low_keywords:
+                keywords_str = ", ".join([f"'{kw}'" for kw in low_keywords[:3]])
+                result = (
+                    Priority.LOW,
+                    "Niski priorytet: zadanie ma charakter opcjonalny i może być "
+                    f"wykonane później (słowa kluczowe: {keywords_str})",
+                )
+            else:
+                result = (
+                    Priority.MEDIUM,
+                    "Średni priorytet: zadanie dotyczy codziennych obowiązków "
+                    "bez określonego terminu",
+                )
 
         _PRIORITY_CACHE[cache_key] = result
         return result

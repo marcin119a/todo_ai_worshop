@@ -36,10 +36,18 @@ class TaskService:
         priority = task_data.priority
         priority_reason = None
 
+        # Always get AI suggestion to check for important cases (e.g., exams)
+        ai_priority, priority_reason = await self.ai_service.suggest_priority(
+            task_data.title, task_data.description
+        )
+
         if use_ai_priority:
-            priority, priority_reason = await self.ai_service.suggest_priority(
-                task_data.title, task_data.description
-            )
+            # Use AI-suggested priority
+            priority = ai_priority
+        elif ai_priority == Priority.HIGH:
+            # Auto-override to HIGH if AI detects high-priority case (e.g., important exam)
+            # This ensures critical tasks are not missed even if user sets wrong priority
+            priority = ai_priority
 
         task = Task(
             title=task_data.title,

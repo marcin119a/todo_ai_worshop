@@ -261,8 +261,8 @@ def test_update_task_priority_reason(client: TestClient, test_db: Session) -> No
     assert data["priority_reason"] == update_data["priority_reason"]
 
 
-def test_create_task_without_ai_has_no_priority_reason(client: TestClient) -> None:
-    """Test that tasks created without AI don't have priority_reason set."""
+def test_create_task_without_ai_has_priority_reason(client: TestClient) -> None:
+    """Test that tasks created without AI still have priority_reason set."""
     task_data = {
         "title": "Regular Task",
         "description": "No AI used",
@@ -274,7 +274,28 @@ def test_create_task_without_ai_has_no_priority_reason(client: TestClient) -> No
 
     assert response.status_code == 201
     data = response.json()
-    assert data["priority_reason"] is None
+    assert data["priority"] == "medium"  # User-provided priority is preserved
+    assert data["priority_reason"] is not None  # But priority_reason is still generated
+    assert len(data["priority_reason"]) > 0
+
+
+def test_create_task_exam_overrides_medium_priority_to_high(client: TestClient) -> None:
+    """Creating exam task with body priority=medium should still result in high priority."""
+    task_data = {
+        "title": "Mam bardzo wazny jutro egzamin,",
+        "description": "Mam bardzo ważne jutro egzamin",
+        "priority": "medium",
+        "status": "todo",
+    }
+
+    response = client.post("/tasks/", json=task_data)
+
+    assert response.status_code == 201
+    data = response.json()
+    # Even though user sent 'medium', AI should detect important exam and override to 'high'
+    assert data["priority"] == Priority.HIGH.value
+    assert data["priority_reason"] is not None
+    assert "egzamin" in (data["priority_reason"] or "").lower()
 
 
 def test_priority_reason_format_contains_key_factors(client: TestClient) -> None:
@@ -307,6 +328,22 @@ def test_priority_reason_format_contains_key_factors(client: TestClient) -> None
         assert data["priority"] == case["expected_priority"].value
         assert data["priority_reason"] is not None
         assert len(data["priority_reason"]) > 10  # Should be meaningful explanation
+
+
+def test_priority_for_important_exam_is_high(client: TestClient) -> None:
+    """Task about very important exam tomorrow should be high priority."""
+    payload = {
+        "title": "Jutro mam bardzo wazny egzamiN!!!",
+        "description": "musze sie przygotowac jutro na egzamin",
+    }
+
+    response = client.post("/tasks/priority/analyze", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["priority"] == Priority.HIGH.value
+    assert data["priority_reason"] is not None
+    assert "egzamin" in data["priority_reason"].lower()
 
 
 def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
