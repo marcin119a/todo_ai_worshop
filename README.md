@@ -5,7 +5,8 @@ A production-ready MVP TODO application built with FastAPI, featuring clean arch
 ## Features
 
 - **CRUD Operations**: Full Create, Read, Update, Delete functionality for tasks
-- **AI Prioritization**: Optional OpenAI integration for intelligent task prioritization
+- **AI Prioritization**: Optional OpenAI integration for intelligent task prioritization with natural language explanations
+- **Priority Explanations**: Transparent AI decisions with detailed explanations including key factors and keywords
 - **Clean Architecture**: Clear separation between API, Service, and Repository layers
 - **Type Safety**: Full type hints and Pydantic v2 validation
 - **Database Migrations**: Alembic for version-controlled database schema changes
@@ -107,10 +108,12 @@ The API will be available at:
 
 - `POST /tasks/` - Create a new task
   - Query parameter: `use_ai_priority` (boolean) - Use AI for priority suggestion
+- `POST /tasks/priority/analyze` - Analyze task content and suggest priority (without creating task)
 - `GET /tasks/` - Get all tasks (with optional filters)
   - Query parameters: `status`, `priority`, `skip`, `limit`
 - `GET /tasks/{task_id}` - Get a specific task by ID
 - `PATCH /tasks/{task_id}` - Update a task
+- `POST /tasks/{task_id}/reanalyze-priority` - Re-analyze and update priority for an existing task using AI
 - `DELETE /tasks/{task_id}` - Delete a task
 
 ### Health & Info
@@ -126,7 +129,7 @@ Tasks have the following fields:
 - `title` (str, max 200 chars) - Task title
 - `description` (str, optional, max 1000 chars) - Task description
 - `priority` (enum) - Priority level: `low`, `medium`, `high`
-- `priority_reason` (str, optional, max 500 chars) - Reason for priority (set by AI)
+- `priority_reason` (str, optional, max 500 chars) - Natural language explanation of why the task received its priority (set by AI, includes key factors and keywords)
 - `status` (enum) - Task status: `todo`, `done`
 - `created_at` (datetime) - Creation timestamp
 - `updated_at` (datetime) - Last update timestamp
@@ -177,6 +180,23 @@ curl -X PATCH "http://localhost:8000/tasks/1" \
   -d '{
     "status": "done"
   }'
+```
+
+### Analyze Priority Without Creating Task
+
+```bash
+curl -X POST "http://localhost:8000/tasks/priority/analyze" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Fix critical bug in production",
+    "description": "Users cannot log in, urgent fix needed"
+  }'
+```
+
+### Re-analyze Priority for Existing Task
+
+```bash
+curl -X POST "http://localhost:8000/tasks/1/reanalyze-priority"
 ```
 
 ### Delete a Task

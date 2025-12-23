@@ -83,14 +83,26 @@ class OpenAIPriorityService:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a task prioritization assistant. Analyze tasks and suggest priority (low, medium, high) with a brief reason.",
+                        "content": (
+                            "You are a task prioritization assistant. Analyze tasks and suggest priority "
+                            "(low, medium, high) with a clear, natural language explanation. "
+                            "Your explanation should mention specific keywords, factors, or context that influenced "
+                            "the decision. Examples: 'Wysoki priorytet: zadanie zawiera słowa kluczowe 'pilne', "
+                            "'deadline', oraz jest związane z terminem' or 'Średni priorytet: zadanie dotyczy "
+                            "codziennych obowiązków bez określonego terminu'."
+                        ),
                     },
                     {
                         "role": "user",
-                        "content": f"{content}\n\nSuggest priority and reason in format: PRIORITY: <low|medium|high>\nREASON: <brief explanation>",
+                        "content": (
+                            f"{content}\n\n"
+                            "Suggest priority and reason in format:\n"
+                            "PRIORITY: <low|medium|high>\n"
+                            "REASON: <natural language explanation mentioning key factors, keywords, or context>"
+                        ),
                     },
                 ],
-                max_tokens=100,
+                max_tokens=150,
                 temperature=0.3,
             )
 
@@ -140,12 +152,27 @@ class MockAIPriorityService:
         if description:
             content += " " + description.lower()
 
-        if any(word in content for word in ["urgent", "critical", "asap", "important"]):
-            result: PriorityCacheValue = (Priority.HIGH, "Contains urgent keywords")
-        elif any(word in content for word in ["low", "minor", "later"]):
-            result = (Priority.LOW, "Contains low-priority keywords")
+        # Find matching keywords for better explanations
+        urgent_keywords = [word for word in ["urgent", "critical", "asap", "important", "pilne", "deadline"] if word in content]
+        low_keywords = [word for word in ["low", "minor", "later", "opcjonalne", "później"] if word in content]
+        
+        if urgent_keywords:
+            keywords_str = ", ".join([f"'{kw}'" for kw in urgent_keywords[:3]])
+            result: PriorityCacheValue = (
+                Priority.HIGH,
+                f"Wysoki priorytet: zadanie zawiera słowa kluczowe {keywords_str}, oraz jest związane z terminem"
+            )
+        elif low_keywords:
+            keywords_str = ", ".join([f"'{kw}'" for kw in low_keywords[:3]])
+            result = (
+                Priority.LOW,
+                f"Niski priorytet: zadanie ma charakter opcjonalny i może być wykonane później (słowa kluczowe: {keywords_str})"
+            )
         else:
-            result = (Priority.MEDIUM, "Default priority based on content analysis")
+            result = (
+                Priority.MEDIUM,
+                "Średni priorytet: zadanie dotyczy codziennych obowiązków bez określonego terminu"
+            )
 
         _PRIORITY_CACHE[cache_key] = result
         return result

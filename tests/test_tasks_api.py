@@ -45,7 +45,9 @@ def test_create_task_with_ai_priority(client: TestClient) -> None:
     assert data["status"] == task_data["status"]
     # MockAIPriorityService should classify this as high priority
     assert data["priority"] == Priority.HIGH.value
-    assert data["priority_reason"] == "Contains urgent keywords"
+    assert data["priority_reason"] is not None
+    assert "Wysoki priorytet" in data["priority_reason"] or "urgent" in data["priority_reason"].lower()
+    assert "słowa kluczowe" in data["priority_reason"] or "keywords" in data["priority_reason"].lower()
 
 
 def test_analyze_priority_endpoint(client: TestClient) -> None:
@@ -60,7 +62,10 @@ def test_analyze_priority_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["priority"] == Priority.HIGH.value
-    assert data["priority_reason"] == "Contains urgent keywords"
+    assert data["priority_reason"] is not None
+    assert len(data["priority_reason"]) > 0
+    # Verify the reason contains meaningful explanation
+    assert "Wysoki priorytet" in data["priority_reason"] or "urgent" in data["priority_reason"].lower()
 
 
 def test_get_task(client: TestClient, test_db: Session) -> None:
@@ -174,4 +179,163 @@ def test_delete_task_not_found(client: TestClient) -> None:
     response = client.delete("/tasks/999")
 
     assert response.status_code == 404
+
+
+def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> None:
+    """Test getting a task that has priority_reason set."""
+    task = Task(
+        title="Test Task with Reason",
+        description="Test description",
+        priority=Priority.HIGH,
+        priority_reason="Wysoki priorytet: zadanie zawiera słowa kluczowe 'pilne', 'deadline'",
+        status=Status.TODO,
+    )
+    test_db.add(task)
+    test_db.commit()
+    test_db.refresh(task)
+
+    response = client.get(f"/tasks/{task.id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["priority_reason"] == task.priority_reason
+    assert "Wysoki priorytet" in data["priority_reason"]
+
+
+def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Session) -> None:
+    """Test that all tasks in list include priority_reason field."""
+    task1 = Task(
+        title="Task 1",
+        priority=Priority.HIGH,
+        priority_reason="High priority reason",
+        status=Status.TODO,
+    )
+    task2 = Task(
+        title="Task 2",
+        priority=Priority.MEDIUM,
+        priority_reason=None,
+        status=Status.TODO,
+    )
+    test_db.add(task1)
+    test_db.add(task2)
+    test_db.commit()
+
+    response = client.get("/tasks/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 2
+    
+    # Find our tasks
+    task1_data = next((t for t in data if t["id"] == task1.id), None)
+    task2_data = next((t for t in data if t["id"] == task2.id), None)
+    
+    assert task1_data is not None
+    assert task2_data is not None
+    assert "priority_reason" in task1_data
+    assert "priority_reason" in task2_data
+    assert task1_data["priority_reason"] == "High priority reason"
+    assert task2_data["priority_reason"] is None
+
+
+def test_update_task_priority_reason(client: TestClient, test_db: Session) -> None:
+    """Test updating a task's priority_reason."""
+    task = Task(
+        title="Original Task",
+        priority=Priority.MEDIUM,
+        priority_reason="Original reason",
+        status=Status.TODO,
+    )
+    test_db.add(task)
+    test_db.commit()
+    test_db.refresh(task)
+
+    update_data = {
+        "priority_reason": "Updated: zadanie zostało przeanalizowane ponownie i wymaga pilnej uwagi",
+    }
+
+    response = client.patch(f"/tasks/{task.id}", json=update_data)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["priority_reason"] == update_data["priority_reason"]
+
+
+def test_create_task_without_ai_has_no_priority_reason(client: TestClient) -> None:
+    """Test that tasks created without AI don't have priority_reason set."""
+    task_data = {
+        "title": "Regular Task",
+        "description": "No AI used",
+        "priority": "medium",
+        "status": "todo",
+    }
+
+    response = client.post("/tasks/", json=task_data)
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["priority_reason"] is None
+
+
+def test_priority_reason_format_contains_key_factors(client: TestClient) -> None:
+    """Test that priority reasons contain key factors or keywords."""
+    test_cases = [
+        {
+            "title": "Urgent task with deadline",
+            "description": "Must be done ASAP",
+            "expected_priority": Priority.HIGH,
+        },
+        {
+            "title": "Low priority optional task",
+            "description": "Can be done later",
+            "expected_priority": Priority.LOW,
+        },
+        {
+            "title": "Regular daily task",
+            "description": "Normal work item",
+            "expected_priority": Priority.MEDIUM,
+        },
+    ]
+
+    for case in test_cases:
+        response = client.post(
+            "/tasks/priority/analyze",
+            json={"title": case["title"], "description": case["description"]},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["priority"] == case["expected_priority"].value
+        assert data["priority_reason"] is not None
+        assert len(data["priority_reason"]) > 10  # Should be meaningful explanation
+
+
+def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
+    """Test re-analyzing priority for an existing task."""
+    task = Task(
+        title="Regular task",
+        description="Normal work",
+        priority=Priority.MEDIUM,
+        priority_reason="Original reason",
+        status=Status.TODO,
+    )
+    test_db.add(task)
+    test_db.commit()
+    test_db.refresh(task)
+
+    response = client.post(f"/tasks/{task.id}/reanalyze-priority")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == task.id
+    assert data["priority_reason"] is not None
+    assert data["priority_reason"] != "Original reason"  # Should be updated
+    assert len(data["priority_reason"]) > 10  # Should be meaningful
+
+
+def test_reanalyze_task_priority_not_found(client: TestClient) -> None:
+    """Test re-analyzing priority for a non-existent task."""
+    response = client.post("/tasks/999/reanalyze-priority")
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
 

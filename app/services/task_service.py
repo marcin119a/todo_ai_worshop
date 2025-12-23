@@ -105,6 +105,27 @@ class TaskService:
 
         return self.repository.update(task)
 
+    async def reanalyze_priority(self, task_id: int) -> Optional[Task]:
+        """
+        Re-analyze priority for an existing task using AI.
+        
+        Args:
+            task_id: Task identifier
+            
+        Returns:
+            Updated task if found, None otherwise
+        """
+        task = self.repository.get_by_id(task_id)
+        if not task:
+            return None
+
+        priority, priority_reason = await self.ai_service.suggest_priority(
+            task.title, task.description
+        )
+
+        update_data = TaskUpdate(priority=priority, priority_reason=priority_reason)
+        return self.update_task(task_id, update_data)
+
     def delete_task(self, task_id: int) -> bool:
         """
         Delete a task by ID.

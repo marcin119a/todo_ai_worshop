@@ -157,6 +157,30 @@ async def update_task(
     return TaskResponse.model_validate(task)
 
 
+@router.post("/{task_id}/reanalyze-priority", response_model=TaskResponse)
+async def reanalyze_task_priority(
+    task_id: int,
+    service: TaskService = Depends(get_task_service),
+) -> TaskResponse:
+    """
+    Re-analyze and update priority for an existing task using AI.
+
+    Args:
+        task_id: Task identifier
+        service: Task service dependency
+
+    Returns:
+        Updated task with new priority and reason
+
+    Raises:
+        HTTPException: If task not found
+    """
+    updated_task = await service.reanalyze_priority(task_id)
+    if not updated_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return TaskResponse.model_validate(updated_task)
+
+
 @router.delete("/{task_id}", status_code=204)
 def delete_task(
     task_id: int,
