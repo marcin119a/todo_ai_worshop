@@ -38,12 +38,19 @@ def client(test_engine):
     """Create a test client with test database dependency override."""
     # Override the get_session dependency to create a new session per request
     from app.db.session import get_session
+    from app.api.routers.tasks import get_ai_service
+    from app.services.ai_priority_service import MockAIPriorityService
     
     def override_get_session():
         with Session(test_engine) as session:
             yield session
     
+    def override_get_ai_service():
+        """Always use MockAIPriorityService in tests for deterministic results."""
+        return MockAIPriorityService()
+    
     app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[get_ai_service] = override_get_ai_service
     
     with TestClient(app) as test_client:
         yield test_client
