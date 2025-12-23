@@ -12,7 +12,11 @@ class TaskBase(BaseModel):
     """Base task schema with common fields."""
 
     title: str = Field(max_length=200, description="Task title")
-    description: Optional[str] = Field(default=None, max_length=1000, description="Task description")
+    description: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+        description="Task description",
+    )
     priority: Priority = Field(default=Priority.MEDIUM, description="Task priority level")
     status: Status = Field(default=Status.TODO, description="Task status")
 
@@ -42,4 +46,22 @@ class TaskResponse(TaskBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PriorityAnalysisRequest(BaseModel):
+    """Request schema for standalone priority analysis endpoint."""
+
+    title: str = Field(max_length=200, description="Task title")
+    description: Optional[str] = Field(
+        default=None,
+        max_length=1000,
+        description="Task description",
+    )
+
+
+class PriorityAnalysisResponse(BaseModel):
+    """Response schema for standalone priority analysis endpoint."""
+
+    priority: Priority = Field(description="Suggested task priority level")
+    priority_reason: str = Field(description="Reason for the suggested priority")
 
