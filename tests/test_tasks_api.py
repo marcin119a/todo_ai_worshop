@@ -69,26 +69,17 @@ def test_analyze_priority_endpoint(client: TestClient) -> None:
     assert "Wysoki priorytet" in data["priority_reason"] or "urgent" in data["priority_reason"].lower()
 
 
-def test_get_task(client: TestClient, test_db: Session, test_user: User) -> None:
+def test_get_task(client: TestClient) -> None:
     """Test getting a task by ID."""
-    # Create a task directly in the database
-    task = Task(
-        title="Test Task",
-        description="Test description",
-        priority=Priority.MEDIUM,
-        status=Status.TODO,
-        owner_id=test_user.id,
-    )
-    test_db.add(task)
-    test_db.commit()
-    test_db.refresh(task)
+    created = client.post("/tasks/", json={"title": "Test Task", "description": "Test description", "priority": "medium", "status": "todo"})
+    task_id = created.json()["id"]
 
-    response = client.get(f"/tasks/{task.id}")
+    response = client.get(f"/tasks/{task_id}")
 
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == task.id
-    assert data["title"] == task.title
+    assert data["id"] == task_id
+    assert data["title"] == "Test Task"
 
 
 def test_get_task_not_found(client: TestClient) -> None:
@@ -117,14 +108,11 @@ def test_get_all_tasks(client: TestClient, test_db: Session, test_user: User) ->
     assert len(data) >= 3
 
 
-def test_get_tasks_filtered_by_status(client: TestClient, test_db: Session, test_user: User) -> None:
+def test_get_tasks_filtered_by_status(client: TestClient) -> None:
     """Test getting tasks filtered by status."""
-    # Create tasks with different statuses
-    todo_task = Task(title="Todo Task", status=Status.TODO, owner_id=test_user.id)
-    done_task = Task(title="Done Task", status=Status.DONE, owner_id=test_user.id)
-    test_db.add(todo_task)
-    test_db.add(done_task)
-    test_db.commit()
+    # Create tasks with different statuses via requests
+    client.post("/tasks/", json={"title": "Todo Task", "status": "todo"})
+    client.post("/tasks/", json={"title": "Done Task", "status": "done"})
 
     response = client.get("/tasks/?status=done")
 
