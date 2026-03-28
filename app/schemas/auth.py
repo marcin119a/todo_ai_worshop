@@ -10,13 +10,6 @@ class UserCreate(BaseModel):
     password: str
 
 
-class UserLogin(BaseModel):
-    """Schema for user login."""
-
-    email: str
-    password: str
-
-
 class Token(BaseModel):
     """JWT token response."""
 

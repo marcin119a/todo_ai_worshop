@@ -23,6 +23,22 @@ from app.services.task_service import TaskService
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
+class TaskListParams:
+    """Common query parameters for task listing endpoints."""
+
+    def __init__(
+        self,
+        status: Optional[Status] = Query(default=None, description="Filter by status"),
+        priority: Optional[Priority] = Query(default=None, description="Filter by priority"),
+        skip: int = Query(default=0, ge=0, description="Number of records to skip"),
+        limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
+    ):
+        self.status = status
+        self.priority = priority
+        self.skip = skip
+        self.limit = limit
+
+
 def get_task_repository(session: Session = Depends(get_session)) -> TaskRepository:
     """Dependency to get task repository."""
     return TaskRepository(session)
@@ -88,10 +104,7 @@ async def analyze_priority(
 
 @router.get("/", response_model=list[TaskResponse])
 def get_tasks(
-    status: Optional[Status] = Query(default=None, description="Filter by status"),
-    priority: Optional[Priority] = Query(default=None, description="Filter by priority"),
-    skip: int = Query(default=0, ge=0, description="Number of records to skip"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Maximum number of records"),
+    params: TaskListParams = Depends(),
     service: TaskService = Depends(get_task_service),
     current_user: User = Depends(get_current_user),
 ) -> list[TaskResponse]:
@@ -99,10 +112,7 @@ def get_tasks(
     Get the authenticated user's tasks with optional filtering.
 
     Args:
-        status: Optional status filter
-        priority: Optional priority filter
-        skip: Number of records to skip
-        limit: Maximum number of records
+        params: Filter and pagination parameters
         service: Task service dependency
         current_user: Authenticated user
 
@@ -110,17 +120,14 @@ def get_tasks(
         List of tasks belonging to the current user
     """
     tasks = service.get_tasks(
-        status=status, priority=priority, skip=skip, limit=limit, owner_id=current_user.id
+        status=params.status, priority=params.priority, skip=params.skip, limit=params.limit, owner_id=current_user.id
     )
     return [TaskResponse.model_validate(task) for task in tasks]
 
 
 @router.get("/admin/all", response_model=list[TaskResponse])
 def admin_get_all_tasks(
-    status: Optional[Status] = Query(default=None),
-    priority: Optional[Priority] = Query(default=None),
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=100, ge=1, le=1000),
+    params: TaskListParams = Depends(),
     service: TaskService = Depends(get_task_service),
     _: User = Depends(get_current_admin_user),
 ) -> list[TaskResponse]:
@@ -128,16 +135,13 @@ def admin_get_all_tasks(
     Admin: get all tasks across all users.
 
     Args:
-        status: Optional status filter
-        priority: Optional priority filter
-        skip: Number of records to skip
-        limit: Maximum number of records
+        params: Filter and pagination parameters
         service: Task service dependency
 
     Returns:
         All tasks (unscoped)
     """
-    tasks = service.get_tasks(status=status, priority=priority, skip=skip, limit=limit)
+    tasks = service.get_tasks(status=params.status, priority=params.priority, skip=params.skip, limit=params.limit)
     return [TaskResponse.model_validate(task) for task in tasks]
 
 
@@ -152,16 +156,7 @@ def admin_get_stats(
     Returns:
         Counts per status and priority
     """
-    all_tasks = service.get_tasks(limit=10000)
-    return {
-        "total": len(all_tasks),
-        "by_status": {
-            s.value: sum(1 for t in all_tasks if t.status == s) for s in Status
-        },
-        "by_priority": {
-            p.value: sum(1 for t in all_tasks if t.priority == p) for p in Priority
-        },
-    }
+    return service.get_stats()
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

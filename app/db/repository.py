@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.db.models import Priority, Status, Task, User
@@ -78,6 +79,22 @@ class TaskRepository:
         self.session.commit()
         self.session.refresh(task)
         return task
+
+    def count_total(self) -> int:
+        """Return total number of tasks."""
+        return self.session.exec(select(func.count(Task.id))).one()
+
+    def count_by_status(self) -> list[tuple]:
+        """Return list of (status, count) tuples."""
+        return self.session.exec(
+            select(Task.status, func.count(Task.id)).group_by(Task.status)
+        ).all()
+
+    def count_by_priority(self) -> list[tuple]:
+        """Return list of (priority, count) tuples."""
+        return self.session.exec(
+            select(Task.priority, func.count(Task.id)).group_by(Task.priority)
+        ).all()
 
     def delete(self, task_id: int, owner_id: Optional[int] = None) -> bool:
         """Delete a task by ID, optionally scoped to an owner."""

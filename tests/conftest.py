@@ -55,7 +55,7 @@ def test_admin(test_db) -> User:
 
 
 def _auth_headers(user: User) -> dict:
-    token = create_access_token({"sub": str(user.id), "is_admin": user.is_admin})
+    token = create_access_token({"sub": str(user.id)})
     return {"Authorization": f"Bearer {token}"}
 
 

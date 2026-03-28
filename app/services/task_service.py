@@ -145,6 +145,16 @@ class TaskService:
         update_data = TaskUpdate(priority=priority, priority_reason=priority_reason)
         return self.update_task(task_id, update_data, owner_id=owner_id)
 
+    def get_stats(self) -> dict:
+        """Return task counts grouped by status and priority."""
+        status_counts = dict(self.repository.count_by_status())
+        priority_counts = dict(self.repository.count_by_priority())
+        return {
+            "total": self.repository.count_total(),
+            "by_status": {s.value: status_counts.get(s, 0) for s in Status},
+            "by_priority": {p.value: priority_counts.get(p, 0) for p in Priority},
+        }
+
     def delete_task(self, task_id: int, owner_id: Optional[int] = None) -> bool:
         """
         Delete a task by ID.
