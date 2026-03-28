@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.db.models import Priority, Status, Task
+from app.db.models import Priority, Status, Task, User
 from app.services.ai_priority_service import MockAIPriorityService, OpenAIPriorityService
 
 
@@ -69,7 +69,7 @@ def test_analyze_priority_endpoint(client: TestClient) -> None:
     assert "Wysoki priorytet" in data["priority_reason"] or "urgent" in data["priority_reason"].lower()
 
 
-def test_get_task(client: TestClient, test_db: Session) -> None:
+def test_get_task(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test getting a task by ID."""
     # Create a task directly in the database
     task = Task(
@@ -77,6 +77,7 @@ def test_get_task(client: TestClient, test_db: Session) -> None:
         description="Test description",
         priority=Priority.MEDIUM,
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -98,11 +99,11 @@ def test_get_task_not_found(client: TestClient) -> None:
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_get_all_tasks(client: TestClient, test_db: Session) -> None:
+def test_get_all_tasks(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test getting all tasks."""
     # Create multiple tasks
     tasks = [
-        Task(title=f"Task {i}", priority=Priority.MEDIUM, status=Status.TODO)
+        Task(title=f"Task {i}", priority=Priority.MEDIUM, status=Status.TODO, owner_id=test_user.id)
         for i in range(3)
     ]
     for task in tasks:
@@ -116,11 +117,11 @@ def test_get_all_tasks(client: TestClient, test_db: Session) -> None:
     assert len(data) >= 3
 
 
-def test_get_tasks_filtered_by_status(client: TestClient, test_db: Session) -> None:
+def test_get_tasks_filtered_by_status(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test getting tasks filtered by status."""
     # Create tasks with different statuses
-    todo_task = Task(title="Todo Task", status=Status.TODO)
-    done_task = Task(title="Done Task", status=Status.DONE)
+    todo_task = Task(title="Todo Task", status=Status.TODO, owner_id=test_user.id)
+    done_task = Task(title="Done Task", status=Status.DONE, owner_id=test_user.id)
     test_db.add(todo_task)
     test_db.add(done_task)
     test_db.commit()
@@ -132,7 +133,7 @@ def test_get_tasks_filtered_by_status(client: TestClient, test_db: Session) -> N
     assert all(task["status"] == "done" for task in data)
 
 
-def test_update_task(client: TestClient, test_db: Session) -> None:
+def test_update_task(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test updating a task."""
     # Create a task
     task = Task(
@@ -140,6 +141,7 @@ def test_update_task(client: TestClient, test_db: Session) -> None:
         description="Original description",
         priority=Priority.LOW,
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -158,10 +160,10 @@ def test_update_task(client: TestClient, test_db: Session) -> None:
     assert data["status"] == update_data["status"]
 
 
-def test_delete_task(client: TestClient, test_db: Session) -> None:
+def test_delete_task(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test deleting a task."""
     # Create a task
-    task = Task(title="Task to Delete", priority=Priority.MEDIUM, status=Status.TODO)
+    task = Task(title="Task to Delete", priority=Priority.MEDIUM, status=Status.TODO, owner_id=test_user.id)
     test_db.add(task)
     test_db.commit()
     test_db.refresh(task)
@@ -182,7 +184,7 @@ def test_delete_task_not_found(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> None:
+def test_get_task_with_priority_reason(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test getting a task that has priority_reason set."""
     task = Task(
         title="Test Task with Reason",
@@ -190,6 +192,7 @@ def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> 
         priority=Priority.HIGH,
         priority_reason="Wysoki priorytet: zadanie zawiera słowa kluczowe 'pilne', 'deadline'",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -203,19 +206,21 @@ def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> 
     assert "Wysoki priorytet" in data["priority_reason"]
 
 
-def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Session) -> None:
+def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test that all tasks in list include priority_reason field."""
     task1 = Task(
         title="Task 1",
         priority=Priority.HIGH,
         priority_reason="High priority reason",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     task2 = Task(
         title="Task 2",
         priority=Priority.MEDIUM,
         priority_reason=None,
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task1)
     test_db.add(task2)
@@ -239,13 +244,14 @@ def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Ses
     assert task2_data["priority_reason"] is None
 
 
-def test_update_task_priority_reason(client: TestClient, test_db: Session) -> None:
+def test_update_task_priority_reason(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test updating a task's priority_reason."""
     task = Task(
         title="Original Task",
         priority=Priority.MEDIUM,
         priority_reason="Original reason",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -347,7 +353,7 @@ def test_priority_for_important_exam_is_high(client: TestClient) -> None:
     assert "egzamin" in data["priority_reason"].lower()
 
 
-def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
+def test_reanalyze_task_priority(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test re-analyzing priority for an existing task."""
     task = Task(
         title="Regular task",
@@ -355,6 +361,7 @@ def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
         priority=Priority.MEDIUM,
         priority_reason="Original reason",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()

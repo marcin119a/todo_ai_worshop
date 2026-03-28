@@ -22,6 +22,16 @@ class Status(str, Enum):
     DONE = "done"
 
 
+class User(SQLModel, table=True):
+    """User database model."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True, max_length=255)
+    hashed_password: str
+    is_admin: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Task(SQLModel, table=True):
     """Task database model."""
 
@@ -31,6 +41,7 @@ class Task(SQLModel, table=True):
     priority: Priority = Field(default=Priority.MEDIUM)
     priority_reason: Optional[str] = Field(default=None, max_length=500)
     status: Status = Field(default=Status.TODO)
+    owner_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

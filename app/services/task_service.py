@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from app.db.models import Task, Priority, Status
+from app.db.models import Priority, Status, Task
 from app.db.repository import TaskRepository
 from app.schemas.task import TaskCreate, TaskUpdate
 from app.services.ai_priority_service import AIPriorityService, MockAIPriorityService
@@ -21,15 +21,16 @@ class TaskService:
         self.ai_service = ai_service or MockAIPriorityService()
 
     async def create_task(
-        self, task_data: TaskCreate, use_ai_priority: bool = False
+        self, task_data: TaskCreate, use_ai_priority: bool = False, owner_id: Optional[int] = None
     ) -> Task:
         """
         Create a new task with optional AI-based prioritization.
-        
+
         Args:
             task_data: Task creation data
             use_ai_priority: Whether to use AI for priority suggestion
-            
+            owner_id: ID of the owning user
+
         Returns:
             Created task
         """
@@ -42,11 +43,9 @@ class TaskService:
         )
 
         if use_ai_priority:
-            # Use AI-suggested priority
             priority = ai_priority
         elif ai_priority == Priority.HIGH:
-            # Auto-override to HIGH if AI detects high-priority case (e.g., important exam)
-            # This ensures critical tasks are not missed even if user sets wrong priority
+            # Auto-override to HIGH if AI detects high-priority case
             priority = ai_priority
 
         task = Task(
@@ -55,21 +54,23 @@ class TaskService:
             priority=priority,
             priority_reason=priority_reason,
             status=task_data.status,
+            owner_id=owner_id,
         )
 
         return self.repository.create(task)
 
-    def get_task(self, task_id: int) -> Optional[Task]:
+    def get_task(self, task_id: int, owner_id: Optional[int] = None) -> Optional[Task]:
         """
-        Get a task by ID.
-        
+        Get a task by ID, scoped to owner if provided.
+
         Args:
             task_id: Task identifier
-            
+            owner_id: If set, only return the task if it belongs to this user
+
         Returns:
-            Task if found, None otherwise
+            Task if found and accessible, None otherwise
         """
-        return self.repository.get_by_id(task_id)
+        return self.repository.get_by_id(task_id, owner_id=owner_id)
 
     def get_tasks(
         self,
@@ -77,33 +78,40 @@ class TaskService:
         priority: Optional[Priority] = None,
         skip: int = 0,
         limit: int = 100,
+        owner_id: Optional[int] = None,
     ) -> list[Task]:
         """
-        Get all tasks with optional filtering.
-        
+        Get tasks with optional filtering, scoped to owner if provided.
+
         Args:
             status: Optional status filter
             priority: Optional priority filter
             skip: Number of records to skip
             limit: Maximum number of records to return
-            
+            owner_id: If set, only return tasks belonging to this user
+
         Returns:
             List of tasks
         """
-        return self.repository.get_all(status=status, priority=priority, skip=skip, limit=limit)
+        return self.repository.get_all(
+            status=status, priority=priority, skip=skip, limit=limit, owner_id=owner_id
+        )
 
-    def update_task(self, task_id: int, task_data: TaskUpdate) -> Optional[Task]:
+    def update_task(
+        self, task_id: int, task_data: TaskUpdate, owner_id: Optional[int] = None
+    ) -> Optional[Task]:
         """
         Update an existing task.
-        
+
         Args:
             task_id: Task identifier
             task_data: Task update data
-            
+            owner_id: If set, only update the task if it belongs to this user
+
         Returns:
-            Updated task if found, None otherwise
+            Updated task if found and accessible, None otherwise
         """
-        task = self.repository.get_by_id(task_id)
+        task = self.repository.get_by_id(task_id, owner_id=owner_id)
         if not task:
             return None
 
@@ -113,17 +121,20 @@ class TaskService:
 
         return self.repository.update(task)
 
-    async def reanalyze_priority(self, task_id: int) -> Optional[Task]:
+    async def reanalyze_priority(
+        self, task_id: int, owner_id: Optional[int] = None
+    ) -> Optional[Task]:
         """
         Re-analyze priority for an existing task using AI.
-        
+
         Args:
             task_id: Task identifier
-            
+            owner_id: If set, only process the task if it belongs to this user
+
         Returns:
-            Updated task if found, None otherwise
+            Updated task if found and accessible, None otherwise
         """
-        task = self.repository.get_by_id(task_id)
+        task = self.repository.get_by_id(task_id, owner_id=owner_id)
         if not task:
             return None
 
@@ -132,17 +143,17 @@ class TaskService:
         )
 
         update_data = TaskUpdate(priority=priority, priority_reason=priority_reason)
-        return self.update_task(task_id, update_data)
+        return self.update_task(task_id, update_data, owner_id=owner_id)
 
-    def delete_task(self, task_id: int) -> bool:
+    def delete_task(self, task_id: int, owner_id: Optional[int] = None) -> bool:
         """
         Delete a task by ID.
-        
+
         Args:
             task_id: Task identifier
-            
-        Returns:
-            True if deleted, False if not found
-        """
-        return self.repository.delete(task_id)
+            owner_id: If set, only delete the task if it belongs to this user
 
+        Returns:
+            True if deleted, False if not found or not accessible
+        """
+        return self.repository.delete(task_id, owner_id=owner_id)

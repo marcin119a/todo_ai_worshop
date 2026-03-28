@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routers import tasks
+from app.api.routers import auth, tasks
 from app.db.session import create_db_and_tables
 
 
@@ -24,6 +24,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(auth.router)
 app.include_router(tasks.router)
 
 
