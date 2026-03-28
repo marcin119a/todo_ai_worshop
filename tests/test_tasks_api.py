@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.models import Priority, Status, Task
+from app.services.ai_priority_service import MockAIPriorityService, OpenAIPriorityService
 
 
 def test_create_task(client: TestClient) -> None:
@@ -375,4 +376,40 @@ def test_reanalyze_task_priority_not_found(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+def test_update_task_not_found(client: TestClient) -> None:
+    """Test updating a non-existent task returns 404."""
+    response = client.patch("/tasks/999", json={"title": "Updated"})
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_get_ai_service_returns_mock_when_no_key() -> None:
+    """Test get_ai_service returns MockAIPriorityService when no API key is set."""
+    from app.api.routers.tasks import get_ai_service
+    from app.core import config
+
+    original = config.settings.openai_api_key
+    config.settings.openai_api_key = ""
+    try:
+        service = get_ai_service()
+        assert isinstance(service, MockAIPriorityService)
+    finally:
+        config.settings.openai_api_key = original
+
+
+def test_get_ai_service_returns_openai_when_key_set() -> None:
+    """Test get_ai_service returns OpenAIPriorityService when API key is set."""
+    from app.api.routers.tasks import get_ai_service
+    from app.core import config
+
+    original = config.settings.openai_api_key
+    config.settings.openai_api_key = "test-api-key"
+    try:
+        service = get_ai_service()
+        assert isinstance(service, OpenAIPriorityService)
+    finally:
+        config.settings.openai_api_key = original
 
