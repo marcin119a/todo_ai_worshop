@@ -1,11 +1,12 @@
 """Repository layer for database operations."""
 
+from datetime import date
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlmodel import Session, select
 
-from app.db.models import Priority, Status, Task, User
+from app.db.models import Category, Priority, Status, Task, User
 
 
 class UserRepository:
@@ -25,6 +26,37 @@ class UserRepository:
 
     def get_by_email(self, email: str) -> Optional[User]:
         return self.session.exec(select(User).where(User.email == email)).first()
+
+
+class CategoryRepository:
+    """Repository for category database operations."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(self, category: Category) -> Category:
+        self.session.add(category)
+        self.session.commit()
+        self.session.refresh(category)
+        return category
+
+    def get_by_id(self, category_id: int) -> Optional[Category]:
+        return self.session.get(Category, category_id)
+
+    def get_by_name(self, name: str) -> Optional[Category]:
+        return self.session.exec(select(Category).where(Category.name == name)).first()
+
+    def delete_and_nullify_tasks(self, category_id: int) -> bool:
+        category = self.get_by_id(category_id)
+        if not category:
+            return False
+        tasks = list(self.session.exec(select(Task).where(Task.category_id == category_id)).all())
+        for task in tasks:
+            task.category_id = None
+            self.session.add(task)
+        self.session.delete(category)
+        self.session.commit()
+        return True
 
 
 class TaskRepository:
@@ -50,6 +82,10 @@ class TaskRepository:
             return None
         return task
 
+    def get_category(self, category_id: int) -> Optional[Category]:
+        """Get a category by ID."""
+        return self.session.get(Category, category_id)
+
     def get_all(
         self,
         status: Optional[Status] = None,
@@ -57,6 +93,9 @@ class TaskRepository:
         skip: int = 0,
         limit: int = 100,
         owner_id: Optional[int] = None,
+        category_id: Optional[int] = None,
+        tag: Optional[str] = None,
+        overdue: bool = False,
     ) -> list[Task]:
         """Get all tasks with optional filtering."""
         statement = select(Task)
@@ -67,7 +106,38 @@ class TaskRepository:
             statement = statement.where(Task.status == status)
         if priority:
             statement = statement.where(Task.priority == priority)
+        if category_id is not None:
+            statement = statement.where(Task.category_id == category_id)
+        if tag is not None:
+            statement = statement.where(
+                text("EXISTS (SELECT 1 FROM json_each(task.tags) WHERE value = :tag_val)").bindparams(tag_val=tag)
+            )
+        if overdue:
+            today = date.today()
+            statement = statement.where(Task.due_date < today).where(Task.status != Status.DONE)
 
+        statement = statement.offset(skip).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def get_upcoming(
+        self,
+        days: int,
+        owner_id: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Task]:
+        """Get tasks due within the next `days` days (not yet done)."""
+        today = date.today()
+        from datetime import timedelta
+        cutoff = today + timedelta(days=days)
+        statement = (
+            select(Task)
+            .where(Task.due_date >= today)
+            .where(Task.due_date <= cutoff)
+            .where(Task.status != Status.DONE)
+        )
+        if owner_id is not None:
+            statement = statement.where(Task.owner_id == owner_id)
         statement = statement.offset(skip).limit(limit)
         return list(self.session.exec(statement).all())
 

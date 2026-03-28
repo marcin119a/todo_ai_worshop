@@ -1,9 +1,11 @@
 """Database models for the TODO application."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 
+from sqlalchemy import Column
+from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
 
@@ -32,6 +34,14 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class Category(SQLModel, table=True):
+    """Task category database model."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True, max_length=100)
+    color: Optional[str] = Field(default=None, max_length=20)
+
+
 class Task(SQLModel, table=True):
     """Task database model."""
 
@@ -42,6 +52,10 @@ class Task(SQLModel, table=True):
     priority_reason: Optional[str] = Field(default=None, max_length=500)
     status: Status = Field(default=Status.TODO)
     owner_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
+    category_id: Optional[int] = Field(default=None, foreign_key="category.id", index=True)
+    tags: Optional[List] = Field(default=None, sa_column=Column(JSON))
+    ai_override: bool = Field(default=False)
+    due_date: Optional[date] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
