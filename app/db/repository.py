@@ -39,8 +39,44 @@ class TaskRepository:
             statement = statement.where(Task.status == status)
         if priority:
             statement = statement.where(Task.priority == priority)
+<<<<<<< Updated upstream
         
         statement = statement.offset(skip).limit(limit)
+=======
+        if category_id is not None:
+            statement = statement.where(Task.category_id == category_id)
+        if tag is not None:
+            statement = statement.where(
+                text("EXISTS (SELECT 1 FROM json_each(task.tags) WHERE value = :tag_val)").bindparams(tag_val=tag)
+            )
+        if overdue:
+            today = date.today()
+            statement = statement.where(Task.due_date < today).where(Task.status != Status.DONE)
+
+        statement = statement.offset(skip).limit(limit)
+        return list(self.session.exec(statement).all())
+
+    def get_upcoming(
+        self,
+        days: int,
+        owner_id: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Task]:
+        """Get tasks due within the next `days` days (not yet done)."""
+        today = date.today()
+        from datetime import timedelta
+        cutoff = today + timedelta(days=days)
+        statement = (
+            select(Task)
+            .where(Task.due_date >= today)
+            .where(Task.due_date <= cutoff)
+            .where(Task.status != Status.DONE)
+        )
+        if owner_id is not None:
+            statement = statement.where(Task.owner_id == owner_id)
+        statement = statement.order_by(Task.due_date).offset(skip).limit(limit)
+>>>>>>> Stashed changes
         return list(self.session.exec(statement).all())
 
     def update(self, task: Task) -> Task:
