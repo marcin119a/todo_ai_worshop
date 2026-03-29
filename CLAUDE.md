@@ -55,6 +55,11 @@ The mock is always used in tests (via dependency override in `conftest.py`). The
 
 Tests use dependency overrides to replace the AI service with `MockAIPriorityService` and use a file-based SQLite test database (not in-memory) for thread safety with FastAPI `TestClient`. Fixtures are function-scoped, so each test gets a fresh DB.
 
+Use **pytest-mock** (`mocker` fixture) for all mocking — never `unittest.mock.patch` directly. Key conventions:
+- `mocker.patch(...)` — auto-reverts after each test, no `with` block needed
+- `mocker.MagicMock()` — for constructing fake objects
+- Module-level globals (e.g. `_PRIORITY_CACHE`) must be cleared in an `autouse` fixture when testing modules that use them
+
 ## Key Conventions (from .cursorrules)
 
 - `async def` for all endpoints
