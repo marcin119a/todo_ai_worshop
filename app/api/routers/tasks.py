@@ -188,6 +188,7 @@ def admin_get_all_tasks(
         limit=params.limit,
         category_id=params.category_id,
         tag=params.tag,
+        overdue=params.overdue,
     )
     return [service.to_response(task) for task in tasks]
 

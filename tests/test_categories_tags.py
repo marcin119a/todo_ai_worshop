@@ -12,6 +12,15 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.models import Priority, Status, Task, User
+from app.services.ai_priority_service import _PRIORITY_CACHE
+
+
+@pytest.fixture(autouse=True)
+def clear_priority_cache():
+    """Clear the shared priority cache before each test."""
+    _PRIORITY_CACHE.clear()
+    yield
+    _PRIORITY_CACHE.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -259,3 +268,67 @@ def test_ai_unavailable_priority_unchanged(client: TestClient) -> None:
 
     assert response.status_code == 201
     assert response.json()["priority"] == Priority.MEDIUM.value
+
+
+def test_reanalyze_preserves_category_based_high_priority(client: TestClient) -> None:
+    """Reanalysis must pass category_name to AI so category-based HIGH is preserved.
+
+    Regression: reanalyze_priority() called suggest_priority(title, description)
+    without category_name — a task in "Egzaminy" was downgraded to MEDIUM after
+    reanalysis because the category context was lost.
+    """
+    cat = client.post("/categories/", json={"name": "Egzaminy"}).json()
+
+    task_resp = client.post(
+        "/tasks/?use_ai_priority=true",
+        json={
+            "title": "Prepare study notes",
+            "description": "Review lecture materials",
+            "priority": "medium",
+            "category_id": cat["id"],
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    assert task["priority"] == Priority.HIGH.value, "Setup: Egzaminy category → HIGH"
+
+    reanalyze_resp = client.post(f"/tasks/{task['id']}/reanalyze-priority")
+
+    assert reanalyze_resp.status_code == 200
+    assert reanalyze_resp.json()["priority"] == Priority.HIGH.value, (
+        "Reanalysis must preserve HIGH priority set by category context"
+    )
+
+
+def test_reanalyze_sets_ai_override_when_ai_overrides_user_priority(
+    client: TestClient,
+) -> None:
+    """ai_override must be True after reanalysis when AI still overrides user priority.
+
+    Verifies the positive case: task in "Egzaminy" category with user-set MEDIUM
+    should keep ai_override=True after reanalysis (AI still returns HIGH).
+    """
+    cat = client.post("/categories/", json={"name": "Egzaminy"}).json()
+
+    task_resp = client.post(
+        "/tasks/?use_ai_priority=true",
+        json={
+            "title": "Final review session",
+            "description": "Go through all topics",
+            "priority": "medium",
+            "category_id": cat["id"],
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    assert task["priority"] == Priority.HIGH.value
+    assert task["ai_override"] is True
+
+    reanalyze_resp = client.post(f"/tasks/{task['id']}/reanalyze-priority")
+
+    assert reanalyze_resp.status_code == 200
+    reanalyzed = reanalyze_resp.json()
+    assert reanalyzed["priority"] == Priority.HIGH.value
+    assert reanalyzed["ai_override"] is True, (
+        "ai_override stays True when AI still overrides user-set MEDIUM to HIGH"
+    )

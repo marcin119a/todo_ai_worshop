@@ -214,12 +214,19 @@ class TaskService:
         if not task:
             return None
 
+        category_name: Optional[str] = None
+        if task.category_id is not None:
+            category = self.repository.get_category(task.category_id)
+            category_name = category.name if category else None
+
         priority, priority_reason = await self.ai_service.suggest_priority(
-            task.title, task.description
+            task.title, task.description, category_name=category_name, due_date=task.due_date
         )
 
-        update_data = TaskUpdate(priority=priority, priority_reason=priority_reason)
-        return self.update_task(task_id, update_data, owner_id=owner_id)
+        task.priority = priority
+        task.priority_reason = priority_reason
+        task.ai_override = priority == Priority.HIGH
+        return self.repository.update(task)
 
     def get_stats(self) -> dict:
         """Return task counts grouped by status and priority."""

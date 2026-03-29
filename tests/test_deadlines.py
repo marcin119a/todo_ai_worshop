@@ -11,7 +11,9 @@ from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app.db.models import Priority, Status, Task, User
 from app.services.ai_priority_service import MockAIPriorityService, _PRIORITY_CACHE
 
 
@@ -119,6 +121,104 @@ def test_filter_overdue_false_returns_all(client: TestClient) -> None:
     assert len(response.json()) == 2
 
 
+def test_admin_all_overdue_filter_returns_only_overdue_tasks(
+    admin_client: TestClient,
+    test_db: Session,
+    test_user: User,
+) -> None:
+    """Admin GET /tasks/admin/all?overdue=true must return only overdue tasks.
+
+    Regression: admin_get_all_tasks() accepted TaskListParams (including overdue)
+    but did not pass overdue=params.overdue to service.get_tasks(), so the filter
+    was silently ignored and all tasks were returned.
+    """
+    today = date.today()
+    test_db.add(Task(
+        title="Overdue Task",
+        priority=Priority.MEDIUM,
+        status=Status.TODO,
+        due_date=today - timedelta(days=3),
+        owner_id=test_user.id,
+    ))
+    test_db.add(Task(
+        title="Future Task",
+        priority=Priority.MEDIUM,
+        status=Status.TODO,
+        due_date=today + timedelta(days=7),
+        owner_id=test_user.id,
+    ))
+    test_db.commit()
+
+    response = admin_client.get("/tasks/admin/all?overdue=true")
+
+    assert response.status_code == 200
+    titles = [t["title"] for t in response.json()]
+    assert "Overdue Task" in titles
+    assert "Future Task" not in titles
+
+
+def test_admin_all_overdue_filter_excludes_done_tasks(
+    admin_client: TestClient,
+    test_db: Session,
+    test_user: User,
+) -> None:
+    """Admin overdue filter must not return tasks with status=done."""
+    today = date.today()
+    test_db.add(Task(
+        title="Done Overdue Task",
+        priority=Priority.MEDIUM,
+        status=Status.DONE,
+        due_date=today - timedelta(days=2),
+        owner_id=test_user.id,
+    ))
+    test_db.add(Task(
+        title="Pending Overdue Task",
+        priority=Priority.MEDIUM,
+        status=Status.TODO,
+        due_date=today - timedelta(days=2),
+        owner_id=test_user.id,
+    ))
+    test_db.commit()
+
+    response = admin_client.get("/tasks/admin/all?overdue=true")
+
+    assert response.status_code == 200
+    titles = [t["title"] for t in response.json()]
+    assert "Pending Overdue Task" in titles
+    assert "Done Overdue Task" not in titles
+
+
+def test_admin_all_without_overdue_filter_returns_all_tasks(
+    admin_client: TestClient,
+    test_db: Session,
+    test_user: User,
+) -> None:
+    """Without ?overdue=true, admin endpoint returns all tasks regardless of due_date."""
+    today = date.today()
+    test_db.add(Task(
+        title="Overdue Task",
+        priority=Priority.MEDIUM,
+        status=Status.TODO,
+        due_date=today - timedelta(days=3),
+        owner_id=test_user.id,
+    ))
+    test_db.add(Task(
+        title="Future Task",
+        priority=Priority.MEDIUM,
+        status=Status.TODO,
+        due_date=today + timedelta(days=7),
+        owner_id=test_user.id,
+    ))
+    test_db.commit()
+
+    response = admin_client.get("/tasks/admin/all")
+
+    assert response.status_code == 200
+    titles = [t["title"] for t in response.json()]
+    assert "Overdue Task" in titles
+    assert "Future Task" in titles
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # US-3.3 — AI receives due_date and raises priority for near deadlines
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,6 +283,35 @@ def test_create_task_with_ai_and_near_due_date_sets_high_priority(client: TestCl
     data = response.json()
     assert data["priority"] == "high"
     assert data["ai_override"] is True
+
+
+def test_reanalyze_preserves_due_date_based_high_priority(client: TestClient) -> None:
+    """Reanalysis must pass due_date to AI so deadline-based HIGH priority is kept.
+
+    Regression: reanalyze_priority() called suggest_priority(title, description)
+    without due_date, so an overdue task was downgraded to MEDIUM after reanalysis.
+    """
+    past_due = (date.today() - timedelta(days=5)).isoformat()
+
+    task_resp = client.post(
+        "/tasks/?use_ai_priority=true",
+        json={
+            "title": "Monthly report",
+            "description": "Compile financial data",
+            "priority": "medium",
+            "due_date": past_due,
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    assert task["priority"] == Priority.HIGH.value, "Setup: overdue task should be HIGH"
+
+    reanalyze_resp = client.post(f"/tasks/{task['id']}/reanalyze-priority")
+
+    assert reanalyze_resp.status_code == 200
+    assert reanalyze_resp.json()["priority"] == Priority.HIGH.value, (
+        "Reanalysis must preserve HIGH priority for overdue task"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

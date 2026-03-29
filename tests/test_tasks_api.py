@@ -1,11 +1,21 @@
 """Tests for task API endpoints."""
 
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.models import Priority, Status, Task, User
-from app.services.ai_priority_service import MockAIPriorityService, OpenAIPriorityService
+from app.services.ai_priority_service import MockAIPriorityService, OpenAIPriorityService, _PRIORITY_CACHE
+
+
+@pytest.fixture(autouse=True)
+def clear_priority_cache():
+    """Clear the shared priority cache before each test."""
+    _PRIORITY_CACHE.clear()
+    yield
+    _PRIORITY_CACHE.clear()
 
 
 def test_create_task(client: TestClient) -> None:
@@ -363,6 +373,46 @@ def test_reanalyze_task_priority(client: TestClient, test_db: Session, test_user
     assert data["priority_reason"] is not None
     assert data["priority_reason"] != "Original reason"  # Should be updated
     assert len(data["priority_reason"]) > 10  # Should be meaningful
+
+
+def test_reanalyze_clears_ai_override_when_priority_no_longer_overridden(
+    client: TestClient,
+) -> None:
+    """ai_override must become False when reanalysis no longer overrides user priority.
+
+    Regression: TaskUpdate had no ai_override field, so the flag was never updated
+    during reanalysis — a task that was AI-overridden to HIGH kept ai_override=True
+    even after reanalysis returned a lower priority.
+
+    Scenario:
+      1. Task created with urgent keyword → AI gives HIGH, ai_override=True
+      2. Task title is updated to a neutral phrase (no urgent keywords, no due_date)
+      3. Reanalysis → AI returns MEDIUM → ai_override must become False
+    """
+    task_resp = client.post(
+        "/tasks/?use_ai_priority=true",
+        json={
+            "title": "Urgent critical fix needed",
+            "priority": "medium",
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    task_id = task["id"]
+    assert task["priority"] == Priority.HIGH.value, "Setup: urgent keyword → HIGH"
+    assert task["ai_override"] is True, "Setup: AI overrode user MEDIUM → ai_override=True"
+
+    # Update title to something neutral — AI will now return MEDIUM on reanalysis
+    client.patch(f"/tasks/{task_id}", json={"title": "Weekly team sync"})
+
+    reanalyze_resp = client.post(f"/tasks/{task_id}/reanalyze-priority")
+
+    assert reanalyze_resp.status_code == 200
+    reanalyzed = reanalyze_resp.json()
+    assert reanalyzed["priority"] == Priority.MEDIUM.value
+    assert reanalyzed["ai_override"] is False, (
+        "ai_override must be cleared when AI no longer overrides user priority"
+    )
 
 
 def test_reanalyze_task_priority_not_found(client: TestClient) -> None:
