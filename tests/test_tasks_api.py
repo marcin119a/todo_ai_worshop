@@ -1,11 +1,21 @@
 """Tests for task API endpoints."""
 
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.db.models import Priority, Status, Task
-from app.services.ai_priority_service import MockAIPriorityService, OpenAIPriorityService
+from app.db.models import Priority, Status, Task, User
+from app.services.ai_priority_service import MockAIPriorityService, OpenAIPriorityService, _PRIORITY_CACHE
+
+
+@pytest.fixture(autouse=True)
+def clear_priority_cache():
+    """Clear the shared priority cache before each test."""
+    _PRIORITY_CACHE.clear()
+    yield
+    _PRIORITY_CACHE.clear()
 
 
 def test_create_task(client: TestClient) -> None:
@@ -69,25 +79,17 @@ def test_analyze_priority_endpoint(client: TestClient) -> None:
     assert "Wysoki priorytet" in data["priority_reason"] or "urgent" in data["priority_reason"].lower()
 
 
-def test_get_task(client: TestClient, test_db: Session) -> None:
+def test_get_task(client: TestClient) -> None:
     """Test getting a task by ID."""
-    # Create a task directly in the database
-    task = Task(
-        title="Test Task",
-        description="Test description",
-        priority=Priority.MEDIUM,
-        status=Status.TODO,
-    )
-    test_db.add(task)
-    test_db.commit()
-    test_db.refresh(task)
+    created = client.post("/tasks/", json={"title": "Test Task", "description": "Test description", "priority": "medium", "status": "todo"})
+    task_id = created.json()["id"]
 
-    response = client.get(f"/tasks/{task.id}")
+    response = client.get(f"/tasks/{task_id}")
 
     assert response.status_code == 200
     data = response.json()
-    assert data["id"] == task.id
-    assert data["title"] == task.title
+    assert data["id"] == task_id
+    assert data["title"] == "Test Task"
 
 
 def test_get_task_not_found(client: TestClient) -> None:
@@ -98,11 +100,11 @@ def test_get_task_not_found(client: TestClient) -> None:
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_get_all_tasks(client: TestClient, test_db: Session) -> None:
+def test_get_all_tasks(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test getting all tasks."""
     # Create multiple tasks
     tasks = [
-        Task(title=f"Task {i}", priority=Priority.MEDIUM, status=Status.TODO)
+        Task(title=f"Task {i}", priority=Priority.MEDIUM, status=Status.TODO, owner_id=test_user.id)
         for i in range(3)
     ]
     for task in tasks:
@@ -116,14 +118,11 @@ def test_get_all_tasks(client: TestClient, test_db: Session) -> None:
     assert len(data) >= 3
 
 
-def test_get_tasks_filtered_by_status(client: TestClient, test_db: Session) -> None:
+def test_get_tasks_filtered_by_status(client: TestClient) -> None:
     """Test getting tasks filtered by status."""
-    # Create tasks with different statuses
-    todo_task = Task(title="Todo Task", status=Status.TODO)
-    done_task = Task(title="Done Task", status=Status.DONE)
-    test_db.add(todo_task)
-    test_db.add(done_task)
-    test_db.commit()
+    # Create tasks with different statuses via requests
+    client.post("/tasks/", json={"title": "Todo Task", "status": "todo"})
+    client.post("/tasks/", json={"title": "Done Task", "status": "done"})
 
     response = client.get("/tasks/?status=done")
 
@@ -132,7 +131,7 @@ def test_get_tasks_filtered_by_status(client: TestClient, test_db: Session) -> N
     assert all(task["status"] == "done" for task in data)
 
 
-def test_update_task(client: TestClient, test_db: Session) -> None:
+def test_update_task(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test updating a task."""
     # Create a task
     task = Task(
@@ -140,6 +139,7 @@ def test_update_task(client: TestClient, test_db: Session) -> None:
         description="Original description",
         priority=Priority.LOW,
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -158,10 +158,10 @@ def test_update_task(client: TestClient, test_db: Session) -> None:
     assert data["status"] == update_data["status"]
 
 
-def test_delete_task(client: TestClient, test_db: Session) -> None:
+def test_delete_task(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test deleting a task."""
     # Create a task
-    task = Task(title="Task to Delete", priority=Priority.MEDIUM, status=Status.TODO)
+    task = Task(title="Task to Delete", priority=Priority.MEDIUM, status=Status.TODO, owner_id=test_user.id)
     test_db.add(task)
     test_db.commit()
     test_db.refresh(task)
@@ -182,7 +182,7 @@ def test_delete_task_not_found(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> None:
+def test_get_task_with_priority_reason(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test getting a task that has priority_reason set."""
     task = Task(
         title="Test Task with Reason",
@@ -190,6 +190,7 @@ def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> 
         priority=Priority.HIGH,
         priority_reason="Wysoki priorytet: zadanie zawiera słowa kluczowe 'pilne', 'deadline'",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -203,19 +204,21 @@ def test_get_task_with_priority_reason(client: TestClient, test_db: Session) -> 
     assert "Wysoki priorytet" in data["priority_reason"]
 
 
-def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Session) -> None:
+def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test that all tasks in list include priority_reason field."""
     task1 = Task(
         title="Task 1",
         priority=Priority.HIGH,
         priority_reason="High priority reason",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     task2 = Task(
         title="Task 2",
         priority=Priority.MEDIUM,
         priority_reason=None,
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task1)
     test_db.add(task2)
@@ -239,13 +242,14 @@ def test_get_all_tasks_includes_priority_reason(client: TestClient, test_db: Ses
     assert task2_data["priority_reason"] is None
 
 
-def test_update_task_priority_reason(client: TestClient, test_db: Session) -> None:
+def test_update_task_priority_reason(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test updating a task's priority_reason."""
     task = Task(
         title="Original Task",
         priority=Priority.MEDIUM,
         priority_reason="Original reason",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -347,7 +351,7 @@ def test_priority_for_important_exam_is_high(client: TestClient) -> None:
     assert "egzamin" in data["priority_reason"].lower()
 
 
-def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
+def test_reanalyze_task_priority(client: TestClient, test_db: Session, test_user: User) -> None:
     """Test re-analyzing priority for an existing task."""
     task = Task(
         title="Regular task",
@@ -355,6 +359,7 @@ def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
         priority=Priority.MEDIUM,
         priority_reason="Original reason",
         status=Status.TODO,
+        owner_id=test_user.id,
     )
     test_db.add(task)
     test_db.commit()
@@ -368,6 +373,46 @@ def test_reanalyze_task_priority(client: TestClient, test_db: Session) -> None:
     assert data["priority_reason"] is not None
     assert data["priority_reason"] != "Original reason"  # Should be updated
     assert len(data["priority_reason"]) > 10  # Should be meaningful
+
+
+def test_reanalyze_clears_ai_override_when_priority_no_longer_overridden(
+    client: TestClient,
+) -> None:
+    """ai_override must become False when reanalysis no longer overrides user priority.
+
+    Regression: TaskUpdate had no ai_override field, so the flag was never updated
+    during reanalysis — a task that was AI-overridden to HIGH kept ai_override=True
+    even after reanalysis returned a lower priority.
+
+    Scenario:
+      1. Task created with urgent keyword → AI gives HIGH, ai_override=True
+      2. Task title is updated to a neutral phrase (no urgent keywords, no due_date)
+      3. Reanalysis → AI returns MEDIUM → ai_override must become False
+    """
+    task_resp = client.post(
+        "/tasks/?use_ai_priority=true",
+        json={
+            "title": "Urgent critical fix needed",
+            "priority": "medium",
+        },
+    )
+    assert task_resp.status_code == 201
+    task = task_resp.json()
+    task_id = task["id"]
+    assert task["priority"] == Priority.HIGH.value, "Setup: urgent keyword → HIGH"
+    assert task["ai_override"] is True, "Setup: AI overrode user MEDIUM → ai_override=True"
+
+    # Update title to something neutral — AI will now return MEDIUM on reanalysis
+    client.patch(f"/tasks/{task_id}", json={"title": "Weekly team sync"})
+
+    reanalyze_resp = client.post(f"/tasks/{task_id}/reanalyze-priority")
+
+    assert reanalyze_resp.status_code == 200
+    reanalyzed = reanalyze_resp.json()
+    assert reanalyzed["priority"] == Priority.MEDIUM.value
+    assert reanalyzed["ai_override"] is False, (
+        "ai_override must be cleared when AI no longer overrides user priority"
+    )
 
 
 def test_reanalyze_task_priority_not_found(client: TestClient) -> None:
